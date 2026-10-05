@@ -56,6 +56,8 @@ footer{color:var(--mut); font-size:12px; text-align:center; padding:16px}
 
 <div class="cards" id="funds"></div>
 
+<section><h2>🎯 KPI 挑戰：一週 +15%</h2><div id="kpi"></div></section>
+
 <section><h2>權益曲線</h2><canvas id="chart"></canvas></section>
 
 <section><h2>持股明細</h2><div class="wrap" id="pos"></div></section>
@@ -98,7 +100,22 @@ function render(){
     <div class="card"><div class="k">累計損益</div><div class="v ${cl(s.total_pnl)}">${s.total_pnl>0?'+':''}${fmt(s.total_pnl)}</div><div class="s ${cl(s.pnl_pct)}">${pc(s.pnl_pct)}</div></div>
     <div class="card"><div class="k">今日損益</div><div class="v ${cl(todayPnl)}">${todayPnl>0?'+':''}${fmt(todayPnl)}</div><div class="s">勝率 ${s.win_rate==null?'—':s.win_rate+'%'}（${s.wins}勝${s.losses}負）</div></div>`;
   drawChart(eq);
+  renderKpi();
   renderPos(); renderTrades(); renderDecs(); renderPlans(); renderAudit();
+}
+
+function renderKpi(){
+  const k=D.kpi; if(!k){$('kpi').innerHTML='';return;}
+  const eq=D.equity, last=eq[eq.length-1], tot=last?last.total:D.meta.capital;
+  const need=k.target_capital-k.start_capital, got=tot-k.start_capital;
+  const pct=Math.max(0,Math.min(100,got/need*100));
+  const daysLeft='10/06～10/12（5 個交易日）';
+  $('kpi').innerHTML=`
+   <div style="font-size:14px;margin-bottom:8px">${k.start_date}～${k.end_date}｜本金 ${fmt(k.start_capital)} → 目標 <b>${fmt(k.target_capital)}</b>（+${k.target_pct}%）</div>
+   <div style="background:#0b0f16;border-radius:8px;height:22px;overflow:hidden">
+     <div style="width:${pct}%;height:100%;background:linear-gradient(90deg,#4f8cff,#2ebd85);border-radius:8px;transition:width .5s"></div>
+   </div>
+   <div style="font-size:13px;color:var(--mut);margin-top:6px">目前 ${fmt(tot)}｜進度 <b class="${cl(got)}">${pct.toFixed(1)}%</b>（${got>=0?'+':''}${fmt(got)} / +${fmt(need)}）｜${daysLeft}</div>`;
 }
 
 function drawChart(eq){

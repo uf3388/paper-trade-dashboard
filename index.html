@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>模擬操盤看板</title>
+<style>
+:root{
+  --bg:#0b0f16; --card:#131a26; --card2:#18202f; --line:#232d40;
+  --txt:#e8edf5; --mut:#8b96ab; --up:#f23645; --dn:#2ebd85; --acc:#4f8cff;
+}
+*{box-sizing:border-box; margin:0; padding:0}
+body{background:var(--bg); color:var(--txt); font-family:-apple-system,"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif; padding:16px; max-width:1200px; margin:0 auto;}
+header{display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:16px;}
+h1{font-size:22px}
+.badge{font-size:12px; background:#3a2b00; color:#ffcf5c; border:1px solid #7a5c00; padding:3px 10px; border-radius:20px; margin-left:8px; vertical-align:middle;}
+.meta{color:var(--mut); font-size:13px}
+.meta button{background:var(--card2); color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:6px 12px; cursor:pointer; font-size:13px}
+.cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:16px;}
+.card{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px;}
+.card .k{font-size:12px; color:var(--mut); margin-bottom:6px}
+.card .v{font-size:22px; font-weight:700}
+.card .s{font-size:12px; color:var(--mut); margin-top:4px}
+.up{color:var(--up)} .dn{color:var(--dn)}
+section{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px;}
+section h2{font-size:16px; margin-bottom:12px}
+table{width:100%; border-collapse:collapse; font-size:13px}
+th,td{padding:8px 6px; text-align:right; border-bottom:1px solid var(--line); white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+th{color:var(--mut); font-weight:500; font-size:12px}
+.wrap{overflow-x:auto}
+.empty{color:var(--mut); text-align:center; padding:24px; font-size:14px}
+#chart{width:100%; height:180px; display:block}
+.plans{display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:12px}
+.plan{background:var(--card2); border:1px solid var(--line); border-radius:10px; padding:12px; font-size:13px}
+.plan .hd{display:flex; justify-content:space-between; align-items:center; margin-bottom:8px}
+.plan .rank{background:var(--acc); color:#fff; font-size:12px; border-radius:6px; padding:2px 8px}
+.plan .nm{font-size:15px; font-weight:700}
+.plan .str{font-size:12px; color:var(--mut)}
+.plan table{font-size:12px}
+.plan td{padding:4px 2px}
+.tag{font-size:11px; background:#0e2a1a; color:#5fd39a; padding:2px 8px; border-radius:10px}
+.tag.lo{font-size:11px; background:#1a2030; color:#9fb4d8; padding:2px 8px; border-radius:10px}
+.dec{font-size:13px; padding:8px 0; border-bottom:1px solid var(--line)}
+.dec .t{color:var(--mut); font-size:12px; margin-right:8px}
+footer{color:var(--mut); font-size:12px; text-align:center; padding:16px}
+.ok{color:var(--dn)} .bad{color:var(--up)}
+</style>
+</head>
+<body>
+<header>
+  <div><h1>模擬操盤看板<span class="badge">模擬交易</span></h1>
+  <div class="meta" id="upd">載入中…</div></div>
+  <div class="meta"><button onclick="load(true)">⟳ 立即更新</button></div>
+</header>
+
+<div class="cards" id="funds"></div>
+
+<section><h2>權益曲線</h2><canvas id="chart"></canvas></section>
+
+<section><h2>持股明細</h2><div class="wrap" id="pos"></div></section>
+
+<section><h2>交易紀錄</h2><div class="wrap" id="trades"></div></section>
+
+<section><h2>操盤決策</h2><div id="decs"></div></section>
+
+<section><h2 id="planTitle">操盤計劃書</h2><div class="plans" id="plans"></div></section>
+
+<section><h2>計劃 vs 實際（查核）</h2><div class="wrap" id="audit"></div></section>
+
+<footer>本看板為模擬交易紀錄，非投資建議。資料每 5 分鐘自動重新讀取。</footer>
+
+<script>
+const $=id=>document.getElementById(id);
+const fmt=n=>n==null||isNaN(n)?'—':Number(n).toLocaleString('en-US');
+const f2=n=>n==null||isNaN(n)?'—':Number(n).toFixed(2);
+const pc=n=>n==null||isNaN(n)?'—':(n>0?'+':'')+n+'%';
+const cl=n=>n>0?'up':n<0?'dn':'';
+let D=null;
+
+async function load(manual){
+  try{
+    const r=await fetch('dashboard.json?t='+Date.now());
+    D=await r.json();
+    render();
+    $('upd').textContent='資料時間：'+D.meta.updated_at+' ｜ 本金 '+fmt(D.meta.capital)+' 元 ｜ '+D.meta.method;
+  }catch(e){ $('upd').textContent='讀取失敗：'+e.message; }
+}
+
+function render(){
+  const s=D.summary, eq=D.equity, last=eq[eq.length-1]||{cash:D.meta.capital,position_value:0,total:D.meta.capital};
+  const cash=last.cash, pv=last.position_value||0, tot=last.total;
+  const todayPnl = eq.length>1 ? tot - eq[eq.length-2].total : 0;
+  $('funds').innerHTML=`
+    <div class="card"><div class="k">虛擬銀行餘額（現金）</div><div class="v">${fmt(cash)}</div><div class="s">元</div></div>
+    <div class="card"><div class="k">持倉市值</div><div class="v">${fmt(pv)}</div><div class="s">${s.open_positions} 檔持股</div></div>
+    <div class="card"><div class="k">總權益</div><div class="v">${fmt(tot)}</div><div class="s">元</div></div>
+    <div class="card"><div class="k">累計損益</div><div class="v ${cl(s.total_pnl)}">${s.total_pnl>0?'+':''}${fmt(s.total_pnl)}</div><div class="s ${cl(s.pnl_pct)}">${pc(s.pnl_pct)}</div></div>
+    <div class="card"><div class="k">今日損益</div><div class="v ${cl(todayPnl)}">${todayPnl>0?'+':''}${fmt(todayPnl)}</div><div class="s">勝率 ${s.win_rate==null?'—':s.win_rate+'%'}（${s.wins}勝${s.losses}負）</div></div>`;
+  drawChart(eq);
+  renderPos(); renderTrades(); renderDecs(); renderPlans(); renderAudit();
+}
+
+function drawChart(eq){
+  const c=$('chart'), ctx=c.getContext('2d');
+  const W=c.width=c.offsetWidth*2, H=c.height=360;
+  ctx.scale(1,1); ctx.clearRect(0,0,W,H);
+  if(eq.length<1){ctx.fillStyle='#8b96ab';ctx.font='28px sans-serif';ctx.fillText('尚無資料',W/2-60,H/2);return;}
+  const vs=eq.map(e=>e.total), mn=Math.min(...vs), mx=Math.max(...vs), rg=(mx-mn)||1;
+  const X=i=>40+i*(W-80)/Math.max(eq.length-1,1), Y=v=>H-40-(v-mn)/rg*(H-80);
+  ctx.strokeStyle='#232d40';ctx.fillStyle='#8b96ab';ctx.font='22px sans-serif';
+  [mn,(mn+mx)/2,mx].forEach(v=>{ctx.beginPath();ctx.moveTo(40,Y(v));ctx.lineTo(W-20,Y(v));ctx.stroke();ctx.fillText(fmt(Math.round(v)),4,Y(v)+8);});
+  ctx.strokeStyle='#4f8cff';ctx.lineWidth=4;ctx.beginPath();
+  vs.forEach((v,i)=>i?ctx.lineTo(X(i),Y(v)):ctx.moveTo(X(i),Y(v)));ctx.stroke();
+  ctx.fillStyle='#4f8cff';
+  vs.forEach((v,i)=>{ctx.beginPath();ctx.arc(X(i),Y(v),7,0,7);ctx.fill();});
+  ctx.fillStyle='#8b96ab';
+  eq.forEach((e,i)=>{if(i%Math.ceil(eq.length/8)==0)ctx.fillText(e.date.slice(5),X(i)-24,H-12);});
+}
+
+function renderPos(){
+  const p=D.positions;
+  if(!p.length){$('pos').innerHTML='<div class="empty">目前無持股</div>';return;}
+  $('pos').innerHTML=`<table><tr><th>代號/名稱</th><th>買進日</th><th>股數</th><th>買進價</th><th>現價</th><th>市值</th><th>未實現損益</th><th>報酬率</th><th>目標/停損</th></tr>
+  ${p.map(x=>`<tr><td>${x.sid} ${x.name||''}</td><td>${x.buy_date||'—'}</td><td>${fmt(x.shares)}</td>
+  <td>${f2(x.buy_price)}</td><td>${f2(x.current_price)}</td><td>${fmt(x.market_value)}</td>
+  <td class="${cl(x.unrealized_pnl)}">${x.unrealized_pnl>0?'+':''}${fmt(x.unrealized_pnl)}</td>
+  <td class="${cl(x.unrealized_pct)}">${pc(x.unrealized_pct)}</td>
+  <td>${f2(x.target)} / ${f2(x.stop)}</td></tr>`).join('')}</table>`;
+}
+
+function renderTrades(){
+  const t=(D.trades||[]).filter(x=>x.close_date);
+  if(!t.length){$('trades').innerHTML='<div class="empty">尚無已平倉交易</div>';return;}
+  $('trades').innerHTML=`<table><tr><th>期間</th><th>代號/名稱</th><th>股數</th><th>買進→賣出</th><th>淨損益</th><th>原因</th></tr>
+  ${t.map(x=>`<tr><td>${x.open_date||''}→${x.close_date||''}</td><td>${x.sid} ${x.name||''}</td><td>${fmt(x.shares)}</td>
+  <td>${f2(x.buy_price)}→${f2(x.close_price)}</td>
+  <td class="${cl(x.net_pnl)}">${x.net_pnl>0?'+':''}${fmt(x.net_pnl)}</td><td>${x.close_reason||'—'}</td></tr>`).join('')}</table>`;
+}
+
+function renderDecs(){
+  const d=(D.decisions||[]).slice(-15).reverse();
+  $('decs').innerHTML=d.length?d.map(x=>`<div class="dec"><span class="t">${x.date||''} ${x.time||''}</span>${x.action||x.note||JSON.stringify(x)}</div>`).join(''):'<div class="empty">尚無決策紀錄</div>';
+}
+
+function renderPlans(){
+  const lp=D.latest_plan;
+  if(!lp){$('plans').innerHTML='<div class="empty">尚無操盤計劃</div>';return;}
+  $('planTitle').textContent=`操盤計劃書（${lp.date}）`;
+  $('plans').innerHTML=lp.stocks.map(s=>`
+   <div class="plan"><div class="hd">
+     <span><span class="rank">#${s['順位']}</span> <span class="nm">${s['代號']} ${s['名稱']}</span></span>
+     <span class="str">強度 ${f2(s['強度'])}</span></div>
+    <div style="margin-bottom:6px"><span class="${s['組別']=='百元以下'?'tag':'tag lo'}">${s['組別']||''}</span>
+     <span class="str"> ${s['位置']||''}</span></div>
+    <table>
+     <tr><td>買入參考</td><td><b>${f2(s['買入參考'])}</b></td><td>買點區</td><td><b>${f2(s['買點區低'])}–${f2(s['買點區高'])}</b></td></tr>
+     <tr><td>停損</td><td class="dn">${f2(s['停損'])}</td><td>目標</td><td class="up">${f2(s['目標'])}</td></tr>
+     <tr><td>昨日收</td><td>${f2(s['昨日收'])} <span class="${cl(s['昨日漲幅%'])}">${pc(s['昨日漲幅%'])}</span></td><td>量比</td><td>${f2(s['量比'])}</td></tr>
+     <tr><td>主力3日億</td><td class="${cl(s['主力3日買超億'])}">${s['主力3日買超億']==null?'—':(s['主力3日買超億']>0?'+':'')+s['主力3日買超億']}</td><td>外資3日億</td><td>${s['外資3日億']??'—'}</td></tr>
+    </table>
+    <div class="str" style="margin-top:6px">${s['指標']||''}</div>
+   </div>`).join('');
+}
+
+function renderAudit(){
+  const a=D.audit||[];
+  if(!a.length){$('audit').innerHTML='<div class="empty">尚無可查核交易</div>';return;}
+  $('audit').innerHTML=`<table><tr><th>日期</th><th>代號</th><th>買進價</th><th>計劃買點區</th><th>符合</th><th>目標/停損</th><th>賣出價</th><th>淨損益</th></tr>
+  ${a.map(x=>{const pl=x.plan||{};return `<tr><td>${x.open_date||''}</td><td>${x.sid}</td><td>${f2(x.buy_price)}</td>
+   <td>${pl.buy_low!=null?f2(pl.buy_low)+'–'+f2(pl.buy_high):'—'}</td>
+   <td class="${x.in_buy_zone==null?'':x.in_buy_zone?'ok':'bad'}">${x.in_buy_zone==null?'—':x.in_buy_zone?'✓':'✗'}</td>
+   <td>${pl.target!=null?f2(pl.target)+' / '+f2(pl.stop):'—'}</td><td>${f2(x.close_price)}</td>
+   <td class="${cl(x.net_pnl)}">${x.net_pnl>0?'+':''}${fmt(x.net_pnl)}</td></tr>`;}).join('')}</table>`;
+}
+
+load(false);
+setInterval(()=>load(false), 300000);
+</script>
+</body>
+</html>

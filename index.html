@@ -33,6 +33,7 @@ th{color:var(--mut); font-weight:500; font-size:12px}
 #chart{width:100%; height:180px; display:block}
 .plans{display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:12px}
 .plan{background:var(--card2); border:1px solid var(--line); border-radius:10px; padding:12px; font-size:13px}
+.plan .review{background:#1a2333; border-left:3px solid #f0b429; border-radius:6px; padding:8px 10px; margin-bottom:8px; font-size:12.5px; line-height:1.6; color:#e8eef7}
 .plan .hd{display:flex; justify-content:space-between; align-items:center; margin-bottom:8px}
 .plan .rank{background:var(--acc); color:#fff; font-size:12px; border-radius:6px; padding:2px 8px}
 .plan .nm{font-size:15px; font-weight:700}
@@ -70,6 +71,8 @@ footer{color:var(--mut); font-size:12px; text-align:center; padding:16px}
 
 <section><h2>計劃 vs 實際（查核）</h2><div class="wrap" id="audit"></div></section>
 
+<section><h2>📝 分析師說明</h2><div id="notes"></div></section>
+
 <footer>本看板為模擬交易紀錄，非投資建議。資料每 5 分鐘自動重新讀取。</footer>
 
 <script>
@@ -101,7 +104,18 @@ function render(){
     <div class="card"><div class="k">今日損益</div><div class="v ${cl(todayPnl)}">${todayPnl>0?'+':''}${fmt(todayPnl)}</div><div class="s">勝率 ${s.win_rate==null?'—':s.win_rate+'%'}（${s.wins}勝${s.losses}負）</div></div>`;
   drawChart(eq);
   renderKpi();
-  renderPos(); renderTrades(); renderDecs(); renderPlans(); renderAudit();
+  renderPos(); renderTrades(); renderDecs(); renderPlans(); renderAudit(); renderNotes();
+}
+
+function renderNotes(){
+  const n=D.analyst_notes||{};
+  const days=Object.keys(n).sort().reverse();
+  if(!days.length){$('notes').innerHTML='<div class="empty">分析師尚未撰寫說明</div>';return;}
+  $('notes').innerHTML=days.map(d=>{
+    const x=n[d]||{};
+    const items=(x.notes||[]).map(t=>`<div class="dec"><span class="t">▪</span>${t}</div>`).join('');
+    return `<div style="margin-bottom:12px"><div style="font-weight:700;margin-bottom:6px">${d}｜${x.strategy||''}</div>${items||'<div class="empty">—</div>'}</div>`;
+  }).join('');
 }
 
 function renderKpi(){
@@ -109,7 +123,7 @@ function renderKpi(){
   const eq=D.equity, last=eq[eq.length-1], tot=last?last.total:D.meta.capital;
   const need=k.target_capital-k.start_capital, got=tot-k.start_capital;
   const pct=Math.max(0,Math.min(100,got/need*100));
-  const daysLeft='10/06～10/12（5 個交易日）';
+  const daysLeft='10/06～10/19（10 個交易日）';
   $('kpi').innerHTML=`
    <div style="font-size:14px;margin-bottom:8px">${k.start_date}～${k.end_date}｜本金 ${fmt(k.start_capital)} → 目標 <b>${fmt(k.target_capital)}</b>（+${k.target_pct}%）</div>
    <div style="background:#0b0f16;border-radius:8px;height:22px;overflow:hidden">
@@ -168,6 +182,7 @@ function renderPlans(){
    <div class="plan"><div class="hd">
      <span><span class="rank">#${s['順位']}</span> <span class="nm">${s['代號']} ${s['名稱']}</span></span>
      <span class="str">強度 ${f2(s['強度'])}</span></div>
+    ${s['檢討']?`<div class="review">${s['檢討']}</div>`:''}
     <div style="margin-bottom:6px"><span class="${s['組別']=='百元以下'?'tag':'tag lo'}">${s['組別']||''}</span>
      <span class="str"> ${s['位置']||''}</span></div>
     <table>

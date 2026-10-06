@@ -44,6 +44,7 @@ th{color:var(--mut); font-weight:500; font-size:12px}
 .tag.lo{font-size:11px; background:#1a2030; color:#9fb4d8; padding:2px 8px; border-radius:10px}
 .dec{font-size:13px; padding:8px 0; border-bottom:1px solid var(--line)}
 .dec .t{color:var(--mut); font-size:12px; margin-right:8px}
+.dec .rs{color:#9fb3cc; font-size:12px}
 footer{color:var(--mut); font-size:12px; text-align:center; padding:16px}
 .ok{color:var(--dn)} .bad{color:var(--up)}
 </style>
@@ -57,7 +58,7 @@ footer{color:var(--mut); font-size:12px; text-align:center; padding:16px}
 
 <div class="cards" id="funds"></div>
 
-<section><h2>🎯 KPI 挑戰：一週 +15%</h2><div id="kpi"></div></section>
+<section><h2 id="kpiTitle">🎯 KPI 挑戰</h2><div id="kpi"></div></section>
 
 <section><h2>權益曲線</h2><canvas id="chart"></canvas></section>
 
@@ -120,6 +121,7 @@ function renderNotes(){
 
 function renderKpi(){
   const k=D.kpi; if(!k){$('kpi').innerHTML='';return;}
+  $('kpiTitle').textContent=`🎯 KPI 挑戰：兩週 +${k.target_pct}%`;
   const eq=D.equity, last=eq[eq.length-1], tot=last?last.total:D.meta.capital;
   const need=k.target_capital-k.start_capital, got=tot-k.start_capital;
   const pct=Math.max(0,Math.min(100,got/need*100));
@@ -171,7 +173,7 @@ function renderTrades(){
 
 function renderDecs(){
   const d=(D.decisions||[]).slice(-15).reverse();
-  $('decs').innerHTML=d.length?d.map(x=>`<div class="dec"><span class="t">${x.date||''} ${x.time||''}</span>${x.action||x.note||JSON.stringify(x)}</div>`).join(''):'<div class="empty">尚無決策紀錄</div>';
+  $('decs').innerHTML=d.length?d.map(x=>`<div class="dec"><span class="t">${x.date||''} ${x.time||''}</span><b>${x.sid||''} ${x.name||''}</b> ${x.action||x.note||JSON.stringify(x)}${x.reason?`<span class="rs">（${x.reason}）</span>`:''}</div>`).join(''):'<div class="empty">尚無決策紀錄</div>';
 }
 
 function renderPlans(){

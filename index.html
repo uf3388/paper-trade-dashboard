@@ -94,14 +94,18 @@ async function load(manual){
 }
 
 function render(){
-  const s=D.summary, eq=D.equity, last=eq[eq.length-1]||{cash:D.meta.capital,position_value:0,total:D.meta.capital};
-  const cash=last.cash, pv=last.position_value||0, tot=last.total;
-  const todayPnl = eq.length>1 ? tot - eq[eq.length-2].total : 0;
+  const s=D.summary, eq=D.equity, live=D.live,
+        last=eq[eq.length-1]||{cash:D.meta.capital,position_value:0,total:D.meta.capital};
+  // 優先用即時數據（2026-10-07 加）
+  const cash=live?live.cash:last.cash, pv=live?live.position_value:(last.position_value||0),
+        tot=live?live.total:last.total;
+  const livePnl=live?live.pnl:(tot-D.meta.capital);
+  const todayPnl = eq.length>1 ? tot - eq[eq.length-2].total : livePnl;
   $('funds').innerHTML=`
-    <div class="card"><div class="k">虛擬銀行餘額（現金）</div><div class="v">${fmt(cash)}</div><div class="s">元</div></div>
-    <div class="card"><div class="k">持倉市值</div><div class="v">${fmt(pv)}</div><div class="s">${s.open_positions} 檔持股</div></div>
-    <div class="card"><div class="k">總權益</div><div class="v">${fmt(tot)}</div><div class="s">元</div></div>
-    <div class="card"><div class="k">累計損益</div><div class="v ${cl(s.total_pnl)}">${s.total_pnl>0?'+':''}${fmt(s.total_pnl)}</div><div class="s ${cl(s.pnl_pct)}">${pc(s.pnl_pct)}</div></div>
+    <div class="card"><div class="k">虛擬銀行餘額（現金）</div><div class="v">${fmt(cash)}</div><div class="s">元${live?' ·即時':''}</div></div>
+    <div class="card"><div class="k">持倉市值</div><div class="v">${fmt(pv)}</div><div class="s">${s.open_positions} 檔持股${live?' ·即時':''}</div></div>
+    <div class="card"><div class="k">總權益</div><div class="v">${fmt(tot)}</div><div class="s">元${live?' ·即時':''}</div></div>
+    <div class="card"><div class="k">即時損益</div><div class="v ${cl(livePnl)}">${livePnl>0?'+':''}${fmt(livePnl)}</div><div class="s ${cl(live?live.pnl_pct:s.pnl_pct)}">${live?pc(live.pnl_pct):pc(s.pnl_pct)}</div></div>
     <div class="card"><div class="k">今日損益</div><div class="v ${cl(todayPnl)}">${todayPnl>0?'+':''}${fmt(todayPnl)}</div><div class="s">勝率 ${s.win_rate==null?'—':s.win_rate+'%'}（${s.wins}勝${s.losses}負）</div></div>`;
   drawChart(eq);
   renderKpi();

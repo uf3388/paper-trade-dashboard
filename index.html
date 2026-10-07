@@ -89,6 +89,8 @@ async function load(manual){
     const r=await fetch('dashboard.json?t='+Date.now());
     D=await r.json();
     render();
+    liveQuotes();
+    setInterval(liveQuotes, 30000);
     $('upd').textContent='資料時間：'+D.meta.updated_at+' ｜ 本金 '+fmt(D.meta.capital)+' 元 ｜ '+D.meta.method;
   }catch(e){ $('upd').textContent='讀取失敗：'+e.message; }
 }
@@ -164,9 +166,49 @@ function renderPos(){
   <td  class="${cl(x.unrealized_pnl)}">${x.unrealized_pnl>0?'+':''}${fmt(x.unrealized_pnl)}</td>
   <td  class="${cl(x.unrealized_pct)}">${pc(x.unrealized_pct)}</td>
   <td>${f2(x.target)} / ${f2(x.stop)}</td></tr>`).join('')}</table>
-  <div class="s" style="margin-top:4px">每 3 分鐘自動更新</div>`;
+  <div class="s" style="margin-top:4px"><span id="qtime"></span></div>`;
 }
 
+
+// 前端即時抓價：打開網頁立即跑，每30秒更新（經 CORS 代理）
+async function liveQuotes(){
+  const p = D.positions;
+  if(!p || !p.length) return;
+  let totMv = 0, totPnl = 0;
+  for(let i = 0; i < p.length; i++){
+    const x = p[i];
+    let px = null;
+    for(const sfx of ['.TWO', '.TW']){
+      try{
+        const url = encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${x.sid}${sfx}?interval=1d&range=1d`);
+        const r = await fetch(`https://api.allorigins.win/get?url=${url}`);
+        const j = await r.json();
+        const m = JSON.parse(j.contents).chart.result[0].meta;
+        if(m.regularMarketPrice){ px = m.regularMarketPrice; break; }
+      }catch(e){}
+    }
+    if(px == null) continue;
+    const mv = Math.round(px * x.shares);
+    const fee = x.buy_fee || 0;
+    const pnl = Math.round((px - x.buy_price) * x.shares) - fee;
+    totMv += mv; totPnl += pnl;
+    const set = (id, v) => { const e = document.getElementById(id); if(e) e.textContent = v; };
+    set('px_'+i, px.toFixed(2));
+    set('mv_'+i, fmt(mv));
+    const pe = document.getElementById('pnl_'+i);
+    if(pe){ pe.textContent = (pnl>0?'+':'')+fmt(pnl); pe.className = cl(pnl); }
+    const ce = document.getElementById('pct_'+i);
+    if(ce){ const pct = (px-x.buy_price)/x.buy_price*100; ce.textContent = pc(pct); ce.className = cl(pct); }
+  }
+  // 更新頂部
+  const pvEl = document.querySelector('#funds .card:nth-child(2) .v');
+  const totEl = document.querySelector('#funds .card:nth-child(3) .v');
+  const cash = D.live ? D.live.cash : D.meta.capital;
+  if(pvEl) pvEl.textContent = fmt(totMv);
+  if(totEl) totEl.textContent = fmt(cash + totMv);
+  const qt = document.getElementById('qtime');
+  if(qt) qt.textContent = '即時 ' + new Date().toLocaleTimeString('zh-TW', {hour12:false});
+}
 
 function renderTrades(){
   const t=(D.trades||[]).filter(x=>x.close_date);

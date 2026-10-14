@@ -108,13 +108,20 @@ function render(){
   const cash=live?live.cash:last.cash, pv=live?live.position_value:(last.position_value||0),
         tot=live?live.total:last.total;
   const livePnl=live?live.pnl:(tot-D.meta.capital);
-  const todayPnl = eq.length>1 ? tot - eq[eq.length-2].total : livePnl;
+  // 今日損益：優先用後端算好的 live.today_pnl（已實現＋持倉單日變化）
+  // 不再用「今日總權益 − 昨日總權益」——換倉日會失真
+  const todayPnl = (live && live.today_pnl!=null) ? live.today_pnl
+                 : (eq.length>1 ? tot - eq[eq.length-2].total : livePnl);
+  const todayReal=(live&&live.today_realized!=null)?live.today_realized:null;
+  const todayUnreal=(live&&live.today_unrealized!=null)?live.today_unrealized:null;
+  const todaySub=(todayReal!=null)?`已實現 ${todayReal>0?'+':''}${fmt(todayReal)} ／ 未實現 ${todayUnreal>0?'+':''}${fmt(todayUnreal)}`
+                 :`勝率 ${s.win_rate==null?'—':s.win_rate+'%'}（${s.wins}勝${s.losses}負）`;
   $('funds').innerHTML=`
     <div class="card"><div class="k">虛擬銀行餘額（現金）</div><div class="v" id="f_cash">${fmt(cash)}</div><div class="s">元${live?' ·即時':''}</div></div>
     <div class="card"><div class="k">持倉市值</div><div class="v" id="f_pv">${fmt(pv)}</div><div class="s">${s.open_positions} 檔持股${live?' ·即時':''}</div></div>
     <div class="card"><div class="k">總權益</div><div class="v" id="f_tot">${fmt(tot)}</div><div class="s">元${live?' ·即時':''}</div></div>
-    <div class="card"><div class="k">即時損益</div><div class="v ${cl(livePnl)}" id="f_pnl">${livePnl>0?'+':''}${fmt(livePnl)}</div><div class="s ${cl(live?live.pnl_pct:s.pnl_pct)}" id="f_pnlp">${live?pc(live.pnl_pct):pc(s.pnl_pct)}</div></div>
-    <div class="card"><div class="k">今日損益</div><div class="v ${cl(todayPnl)}">${todayPnl>0?'+':''}${fmt(todayPnl)}</div><div class="s">勝率 ${s.win_rate==null?'—':s.win_rate+'%'}（${s.wins}勝${s.losses}負）</div></div>`;
+    <div class="card"><div class="k">累計損益</div><div class="v ${cl(livePnl)}" id="f_pnl">${livePnl>0?'+':''}${fmt(livePnl)}</div><div class="s ${cl(live?live.pnl_pct:s.pnl_pct)}" id="f_pnlp">${live?pc(live.pnl_pct):pc(s.pnl_pct)}</div></div>
+    <div class="card"><div class="k">今日損益</div><div class="v ${cl(todayPnl)}">${todayPnl>0?'+':''}${fmt(todayPnl)}</div><div class="s">${todaySub}</div></div>`;
   drawChart(eq);
   renderKpi();
   renderPos(); renderTrades(); renderDecs(); renderPlans(); renderAudit(); renderNotes();
@@ -134,7 +141,8 @@ function renderNotes(){
 function renderKpi(){
   const k=D.kpi; if(!k){$('kpi').innerHTML='';return;}
   $('kpiTitle').textContent=`🎯 KPI 挑戰：兩週 +${k.target_pct}%`;
-  const eq=D.equity, last=eq[eq.length-1], tot=last?last.total:D.meta.capital;
+  const eq=D.equity, last=eq[eq.length-1];
+  const tot=(D.live&&D.live.total)||(last?last.total:D.meta.capital);
   const need=k.target_capital-k.start_capital, got=tot-k.start_capital;
   const pct=Math.max(0,Math.min(100,got/need*100));
   const daysLeft='10/06～10/19（10 個交易日）';
@@ -183,8 +191,9 @@ function renderPos(){
 // 後端位址可覆寫：在 URL 加 ?api=http://host:port
 // 注意：6666 是 Chrome 封鎖埠（IRC 6665-6669, ERR_UNSAFE_PORT），不可用；預設 8765
 const _qp = new URLSearchParams(location.search).get('api');
-const BACKEND = _qp || ((location.hostname==='127.0.0.1'||location.hostname==='localhost') && location.port==='8765')
-  ? (_qp || '') : 'http://127.0.0.1:8765';
+// 位址決定：?api= 覆寫 > 若本身就在後端 origins（127.0.0.1:8765）則用相對路徑 > 預設本機後端
+const _onBackend = (location.hostname==='127.0.0.1'||location.hostname==='localhost') && location.port==='8765';
+const BACKEND = _qp ? _qp : (_onBackend ? '' : 'http://127.0.0.1:8765');
 
 const MARKET_OPEN_MS = t => { const d=new Date(t), day=d.getDay(), m=d.getHours()*60+d.getMinutes();
   return day>=1&&day<=5 && m>=540 && m<=810; }; // 週一~五 09:00-13:30
@@ -234,8 +243,8 @@ async function liveQuotes(){
     if(px==null) continue;
     ok++;
     const mv=Math.round(px*x.shares);
-    const fee=x.buy_fee||0;
-    const pnl=Math.round((px-x.buy_price)*x.shares)-fee;
+    // 持倉損益不重複扣手續費（買費已計入成本現金），與後端一致
+    const pnl=Math.round((px-x.buy_price)*x.shares);
     totMv+=mv;
     const set=(id,v,cls)=>{const e=document.getElementById(id);if(!e)return; if(e.textContent!==v){e.textContent=v; if(cls!==undefined)e.className=cls;}};
     const oldPx=prev['px_'+i];

@@ -14,20 +14,28 @@ body{background:var(--bg); color:var(--txt); font-family:-apple-system,"Noto San
 header{display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:16px;}
 h1{font-size:22px}
 .badge{font-size:12px; background:#3a2b00; color:#ffcf5c; border:1px solid #7a5c00; padding:3px 10px; border-radius:20px; margin-left:8px; vertical-align:middle;}
+.live-dot{display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--mut); margin-right:5px; vertical-align:middle;}
+.live-dot.on{background:#2ebd85; box-shadow:0 0 6px #2ebd85; animation:pulse 2s infinite;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
 .meta{color:var(--mut); font-size:13px}
 .meta button{background:var(--card2); color:var(--txt); border:1px solid var(--line); border-radius:8px; padding:6px 12px; cursor:pointer; font-size:13px}
+.meta button:hover{border-color:var(--acc)}
 .cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:16px;}
 .card{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px;}
 .card .k{font-size:12px; color:var(--mut); margin-bottom:6px}
-.card .v{font-size:22px; font-weight:700}
+.card .v{font-size:22px; font-weight:700; transition:color .3s}
 .card .s{font-size:12px; color:var(--mut); margin-top:4px}
 .up{color:var(--up)} .dn{color:var(--dn)}
+.flash-up{animation:fu .6s} .flash-dn{animation:fd .6s}
+@keyframes fu{0%{background:#2a1216}100%{background:transparent}}
+@keyframes fd{0%{background:#0e2a1a}100%{background:transparent}}
 section{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px;}
 section h2{font-size:16px; margin-bottom:12px}
 table{width:100%; border-collapse:collapse; font-size:13px}
 th,td{padding:8px 6px; text-align:right; border-bottom:1px solid var(--line); white-space:nowrap}
 th:first-child,td:first-child{text-align:left}
 th{color:var(--mut); font-weight:500; font-size:12px}
+tbody tr:hover{background:var(--card2)}
 .wrap{overflow-x:auto}
 .empty{color:var(--mut); text-align:center; padding:24px; font-size:14px}
 #chart{width:100%; height:180px; display:block}
@@ -47,67 +55,65 @@ th{color:var(--mut); font-weight:500; font-size:12px}
 .dec .rs{color:#9fb3cc; font-size:12px}
 footer{color:var(--mut); font-size:12px; text-align:center; padding:16px}
 .ok{color:var(--dn)} .bad{color:var(--up)}
+.delta{font-size:11px; margin-left:4px}
+#toast{position:fixed; bottom:20px; right:20px; background:var(--card2); border:1px solid var(--line); border-radius:8px; padding:10px 16px; font-size:13px; opacity:0; transition:opacity .3s; pointer-events:none}
+#toast.show{opacity:1}
+@media(max-width:640px){.cards{grid-template-columns:repeat(2,1fr)} h1{font-size:18px} .card .v{font-size:18px}}
 </style>
 </head>
 <body>
 <header>
   <div><h1>模擬操盤看板<span class="badge">模擬交易</span></h1>
   <div class="meta" id="upd">載入中…</div></div>
-  <div class="meta"><button onclick="load(true)">⟳ 立即更新</button></div>
+  <div class="meta"><span id="liveStatus" style="margin-right:10px"><span class="live-dot" id="dot"></span><span id="liveTxt">待機</span></span><button onclick="load(true)">⟳ 立即更新</button></div>
 </header>
 
 <div class="cards" id="funds"></div>
-
 <section><h2 id="kpiTitle">🎯 KPI 挑戰</h2><div id="kpi"></div></section>
-
 <section><h2>權益曲線</h2><canvas id="chart"></canvas></section>
-
-<section><h2>持股明細</h2><div class="wrap" id="pos"></div></section>
-
+<section><h2>持股明細 <span class="str" style="font-size:12px;color:var(--mut);font-weight:400" id="qtime"></span></h2><div class="wrap" id="pos"></div></section>
 <section><h2>交易紀錄</h2><div class="wrap" id="trades"></div></section>
-
 <section><h2>操盤決策</h2><div id="decs"></div></section>
-
 <section><h2 id="planTitle">操盤計劃書</h2><div class="plans" id="plans"></div></section>
-
 <section><h2>計劃 vs 實際（查核）</h2><div class="wrap" id="audit"></div></section>
-
 <section><h2>📝 分析師說明</h2><div id="notes"></div></section>
 
-<footer>本看板為模擬交易紀錄，非投資建議。資料每 5 分鐘自動重新讀取。</footer>
+<footer>本看板為模擬交易紀錄，非投資建議。資料每 5 分鐘重新讀取，盤中持股報價每 10 秒更新。</footer>
+<div id="toast"></div>
 
 <script>
 const $=id=>document.getElementById(id);
 const fmt=n=>n==null||isNaN(n)?'—':Number(n).toLocaleString('en-US');
 const f2=n=>n==null||isNaN(n)?'—':Number(n).toFixed(2);
-const pc=n=>n==null||isNaN(n)?'—':(n>0?'+':'')+n+'%';
+const pc=n=>n==null||isNaN(n)?'—':(n>0?'+':'')+Number(n).toFixed(2)+'%';
 const cl=n=>n>0?'up':n<0?'dn':'';
-let D=null;
+let D=null, prev={}, liveTimer=null, liveOn=false;
+
+function toast(m){const t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2000);}
 
 async function load(manual){
   try{
     const r=await fetch('dashboard.json?t='+Date.now());
     D=await r.json();
     render();
-    liveQuotes();
-    setInterval(liveQuotes, 30000);
+    startLive();
     $('upd').textContent='資料時間：'+D.meta.updated_at+' ｜ 本金 '+fmt(D.meta.capital)+' 元 ｜ '+D.meta.method;
+    if(manual) toast('已重新讀取');
   }catch(e){ $('upd').textContent='讀取失敗：'+e.message; }
 }
 
 function render(){
   const s=D.summary, eq=D.equity, live=D.live,
         last=eq[eq.length-1]||{cash:D.meta.capital,position_value:0,total:D.meta.capital};
-  // 優先用即時數據（2026-10-07 加）
   const cash=live?live.cash:last.cash, pv=live?live.position_value:(last.position_value||0),
         tot=live?live.total:last.total;
   const livePnl=live?live.pnl:(tot-D.meta.capital);
   const todayPnl = eq.length>1 ? tot - eq[eq.length-2].total : livePnl;
   $('funds').innerHTML=`
-    <div class="card"><div class="k">虛擬銀行餘額（現金）</div><div class="v">${fmt(cash)}</div><div class="s">元${live?' ·即時':''}</div></div>
-    <div class="card"><div class="k">持倉市值</div><div class="v">${fmt(pv)}</div><div class="s">${s.open_positions} 檔持股${live?' ·即時':''}</div></div>
-    <div class="card"><div class="k">總權益</div><div class="v">${fmt(tot)}</div><div class="s">元${live?' ·即時':''}</div></div>
-    <div class="card"><div class="k">即時損益</div><div class="v ${cl(livePnl)}">${livePnl>0?'+':''}${fmt(livePnl)}</div><div class="s ${cl(live?live.pnl_pct:s.pnl_pct)}">${live?pc(live.pnl_pct):pc(s.pnl_pct)}</div></div>
+    <div class="card"><div class="k">虛擬銀行餘額（現金）</div><div class="v" id="f_cash">${fmt(cash)}</div><div class="s">元${live?' ·即時':''}</div></div>
+    <div class="card"><div class="k">持倉市值</div><div class="v" id="f_pv">${fmt(pv)}</div><div class="s">${s.open_positions} 檔持股${live?' ·即時':''}</div></div>
+    <div class="card"><div class="k">總權益</div><div class="v" id="f_tot">${fmt(tot)}</div><div class="s">元${live?' ·即時':''}</div></div>
+    <div class="card"><div class="k">即時損益</div><div class="v ${cl(livePnl)}" id="f_pnl">${livePnl>0?'+':''}${fmt(livePnl)}</div><div class="s ${cl(live?live.pnl_pct:s.pnl_pct)}" id="f_pnlp">${live?pc(live.pnl_pct):pc(s.pnl_pct)}</div></div>
     <div class="card"><div class="k">今日損益</div><div class="v ${cl(todayPnl)}">${todayPnl>0?'+':''}${fmt(todayPnl)}</div><div class="s">勝率 ${s.win_rate==null?'—':s.win_rate+'%'}（${s.wins}勝${s.losses}負）</div></div>`;
   drawChart(eq);
   renderKpi();
@@ -142,81 +148,133 @@ function renderKpi(){
 
 function drawChart(eq){
   const c=$('chart'), ctx=c.getContext('2d');
-  const W=c.width=c.offsetWidth*2, H=c.height=360;
-  ctx.scale(1,1); ctx.clearRect(0,0,W,H);
-  if(eq.length<1){ctx.fillStyle='#8b96ab';ctx.font='28px sans-serif';ctx.fillText('尚無資料',W/2-60,H/2);return;}
+  const dpr=window.devicePixelRatio||1;
+  const W=c.width=c.offsetWidth*dpr, H=c.height=360*dpr;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  const w=c.offsetWidth, h=180;
+  ctx.clearRect(0,0,w,h);
+  if(eq.length<1){ctx.fillStyle='#8b96ab';ctx.font='14px sans-serif';ctx.fillText('尚無資料',w/2-30,h/2);return;}
   const vs=eq.map(e=>e.total), mn=Math.min(...vs), mx=Math.max(...vs), rg=(mx-mn)||1;
-  const X=i=>40+i*(W-80)/Math.max(eq.length-1,1), Y=v=>H-40-(v-mn)/rg*(H-80);
-  ctx.strokeStyle='#232d40';ctx.fillStyle='#8b96ab';ctx.font='22px sans-serif';
-  [mn,(mn+mx)/2,mx].forEach(v=>{ctx.beginPath();ctx.moveTo(40,Y(v));ctx.lineTo(W-20,Y(v));ctx.stroke();ctx.fillText(fmt(Math.round(v)),4,Y(v)+8);});
-  ctx.strokeStyle='#4f8cff';ctx.lineWidth=4;ctx.beginPath();
+  const X=i=>40+i*(w-70)/Math.max(eq.length-1,1), Y=v=>h-30-(v-mn)/rg*(h-55);
+  ctx.strokeStyle='#232d40';ctx.fillStyle='#8b96ab';ctx.font='11px sans-serif';
+  [mn,(mn+mx)/2,mx].forEach(v=>{ctx.beginPath();ctx.moveTo(40,Y(v));ctx.lineTo(w-15,Y(v));ctx.stroke();ctx.fillText(fmt(Math.round(v)),2,Y(v)+4);});
+  ctx.strokeStyle='#4f8cff';ctx.lineWidth=2;ctx.beginPath();
   vs.forEach((v,i)=>i?ctx.lineTo(X(i),Y(v)):ctx.moveTo(X(i),Y(v)));ctx.stroke();
   ctx.fillStyle='#4f8cff';
-  vs.forEach((v,i)=>{ctx.beginPath();ctx.arc(X(i),Y(v),7,0,7);ctx.fill();});
+  vs.forEach((v,i)=>{ctx.beginPath();ctx.arc(X(i),Y(v),3.5,0,7);ctx.fill();});
   ctx.fillStyle='#8b96ab';
-  eq.forEach((e,i)=>{if(i%Math.ceil(eq.length/8)==0)ctx.fillText(e.date.slice(5),X(i)-24,H-12);});
+  eq.forEach((e,i)=>{if(i%Math.ceil(eq.length/8)==0)ctx.fillText(e.date.slice(5),X(i)-12,h-10);});
 }
 
 function renderPos(){
-  const p=D.positions;
+  const p=D.positions||[];
   if(!p.length){$('pos').innerHTML='<div class="empty">目前無持股</div>';return;}
-  $('pos').innerHTML=`<table><tr><th>代號/名稱</th><th>買進日</th><th>股數</th><th>買進價</th><th>現價</th><th>市值</th><th>未實現損益</th><th>報酬率</th><th>目標/停損</th></tr>
-  ${p.map((x,i)=>`<tr><td>${x.sid} ${x.name||''}</td><td>${x.buy_date||'—'}</td><td>${fmt(x.shares)}</td>
-  <td>${f2(x.buy_price)}</td><td >${f2(x.current_price)}</td><td >${fmt(x.market_value)}</td>
-  <td  class="${cl(x.unrealized_pnl)}">${x.unrealized_pnl>0?'+':''}${fmt(x.unrealized_pnl)}</td>
-  <td  class="${cl(x.unrealized_pct)}">${pc(x.unrealized_pct)}</td>
-  <td>${f2(x.target)} / ${f2(x.stop)}</td></tr>`).join('')}</table>
-  <div class="s" style="margin-top:4px"><span id="qtime"></span></div>`;
+  $('pos').innerHTML=`<table><thead><tr><th>代號/名稱</th><th>買進日</th><th>股數</th><th>買進價</th><th>現價</th><th>市值</th><th>未實現損益</th><th>報酬率</th><th>目標/停損</th></tr></thead>
+  <tbody>${p.map((x,i)=>`<tr id="row_${i}"><td>${x.sid} ${x.name||''}</td><td>${x.buy_date||'—'}</td><td>${fmt(x.shares)}</td>
+  <td>${f2(x.buy_price)}</td><td id="px_${i}">${f2(x.current_price)}</td><td id="mv_${i}">${fmt(x.market_value)}</td>
+  <td id="pnl_${i}" class="${cl(x.unrealized_pnl)}">${x.unrealized_pnl>0?'+':''}${fmt(x.unrealized_pnl)}</td>
+  <td id="pct_${i}" class="${cl(x.unrealized_pct)}">${pc(x.unrealized_pct)}</td>
+  <td>${f2(x.target)} / ${f2(x.stop)}</td></tr>`).join('')}</tbody></table>`;
 }
 
+// ===== 盤中即時報價：本後端代理 TWSE MIS，每 10 秒 =====
+// 靜態站無法直連 MIS（CORS），走本後端 /api/market/quotes 代理。
+// 後端不可用時（如純靜態瀏覽）自動退回 Yahoo 經 CORS 代理。
+// 後端位址可覆寫：在 URL 加 ?api=http://host:port
+// 注意：6666 是 Chrome 封鎖埠（IRC 6665-6669, ERR_UNSAFE_PORT），不可用；預設 8765
+const _qp = new URLSearchParams(location.search).get('api');
+const BACKEND = _qp || ((location.hostname==='127.0.0.1'||location.hostname==='localhost') && location.port==='8765')
+  ? (_qp || '') : 'http://127.0.0.1:8765';
 
-// 前端即時抓價：打開網頁立即跑，每30秒更新（經 CORS 代理）
-async function liveQuotes(){
-  const p = D.positions;
-  if(!p || !p.length) return;
-  let totMv = 0, totPnl = 0;
-  for(let i = 0; i < p.length; i++){
-    const x = p[i];
-    let px = null;
-    for(const sfx of ['.TWO', '.TW']){
-      try{
-        const url = encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${x.sid}${sfx}?interval=1d&range=1d`);
-        const r = await fetch(`https://api.allorigins.win/get?url=${url}`);
-        const j = await r.json();
-        const m = JSON.parse(j.contents).chart.result[0].meta;
-        if(m.regularMarketPrice){ px = m.regularMarketPrice; break; }
-      }catch(e){}
-    }
-    if(px == null) continue;
-    const mv = Math.round(px * x.shares);
-    const fee = x.buy_fee || 0;
-    const pnl = Math.round((px - x.buy_price) * x.shares) - fee;
-    totMv += mv; totPnl += pnl;
-    const set = (id, v) => { const e = document.getElementById(id); if(e) e.textContent = v; };
-    set('px_'+i, px.toFixed(2));
-    set('mv_'+i, fmt(mv));
-    const pe = document.getElementById('pnl_'+i);
-    if(pe){ pe.textContent = (pnl>0?'+':'')+fmt(pnl); pe.className = cl(pnl); }
-    const ce = document.getElementById('pct_'+i);
-    if(ce){ const pct = (px-x.buy_price)/x.buy_price*100; ce.textContent = pc(pct); ce.className = cl(pct); }
+const MARKET_OPEN_MS = t => { const d=new Date(t), day=d.getDay(), m=d.getHours()*60+d.getMinutes();
+  return day>=1&&day<=5 && m>=540 && m<=810; }; // 週一~五 09:00-13:30
+
+async function fetchQuotesBackend(ids){
+  const r = await fetch(`${BACKEND}/api/market/quotes?ids=${ids.join(',')}&t=${Date.now()}`,{cache:'no-store'});
+  if(!r.ok) throw new Error('backend '+r.status);
+  const j = await r.json();
+  return j.quotes||{};
+}
+
+async function fetchQuoteYahoo(sid){
+  for(const sfx of ['.TW','.TWO']){
+    try{
+      const url=`https://query1.finance.yahoo.com/v8/finance/chart/${sid}${sfx}?interval=1d&range=1d`;
+      const r=await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,{cache:'no-store'});
+      const j=await r.json();
+      const m=j.chart.result[0].meta;
+      if(m.regularMarketPrice) return m.regularMarketPrice;
+    }catch(e){}
   }
-  // 更新頂部
-  const pvEl = document.querySelector('#funds .card:nth-child(2) .v');
-  const totEl = document.querySelector('#funds .card:nth-child(3) .v');
-  const cash = D.live ? D.live.cash : D.meta.capital;
-  if(pvEl) pvEl.textContent = fmt(totMv);
-  if(totEl) totEl.textContent = fmt(cash + totMv);
-  const qt = document.getElementById('qtime');
-  if(qt) qt.textContent = '即時 ' + new Date().toLocaleTimeString('zh-TW', {hour12:false});
+  return null;
+}
+
+function setLiveState(on,txt){
+  const dot=$('dot'), lt=$('liveTxt');
+  if(on){dot.classList.add('on');lt.textContent=txt||'即時';}
+  else{dot.classList.remove('on');lt.textContent=txt||'待機';}
+}
+
+async function liveQuotes(){
+  const p=D&&D.positions;
+  if(!p||!p.length){setLiveState(false,'無持股');return;}
+  if(!MARKET_OPEN_MS(Date.now())){setLiveState(false,'收盤');return;}
+  const ids=p.map(x=>String(x.sid));
+  let priceMap={}, src='';
+  try{ priceMap=await fetchQuotesBackend(ids); src='後端'; }
+  catch(e){
+    for(const sid of ids){ const v=await fetchQuoteYahoo(sid); if(v!=null) priceMap[sid]=v; }
+    src='Yahoo';
+  }
+  let totMv=0, ok=0;
+  for(let i=0;i<p.length;i++){
+    const x=p[i];
+    const q=priceMap[String(x.sid)];
+    const px=(q&&typeof q==='object')?q.price:q;
+    if(px==null) continue;
+    ok++;
+    const mv=Math.round(px*x.shares);
+    const fee=x.buy_fee||0;
+    const pnl=Math.round((px-x.buy_price)*x.shares)-fee;
+    totMv+=mv;
+    const set=(id,v,cls)=>{const e=document.getElementById(id);if(!e)return; if(e.textContent!==v){e.textContent=v; if(cls!==undefined)e.className=cls;}};
+    const oldPx=prev['px_'+i];
+    set('px_'+i, Number(px).toFixed(2));
+    if(oldPx!=null && oldPx!==px){const row=$('row_'+i); if(row){row.classList.remove('flash-up','flash-dn'); void row.offsetWidth; row.classList.add(px>oldPx?'flash-up':'flash-dn');}}
+    prev['px_'+i]=px;
+    set('mv_'+i, fmt(mv));
+    const pnlTxt=(pnl>0?'+':'')+fmt(pnl);
+    set('pnl_'+i, pnlTxt, cl(pnl));
+    const pct=(px-x.buy_price)/x.buy_price*100;
+    set('pct_'+i, pc(pct), cl(pct));
+  }
+  if(ok){
+    const cash=D.live?D.live.cash:0;
+    const tot=cash+totMv;
+    const pnl=tot-D.meta.capital;
+    const e1=$('f_pv'), e2=$('f_tot'), e3=$('f_pnl');
+    if(e1)e1.textContent=fmt(totMv);
+    if(e2)e2.textContent=fmt(tot);
+    if(e3){e3.textContent=(pnl>0?'+':'')+fmt(pnl); e3.className=cl(pnl);}
+    const tm=new Date().toLocaleTimeString('zh-TW',{hour12:false});
+    setLiveState(true,'即時 '+tm);
+    $('qtime').textContent='· '+src+'報價 '+tm+' 每10秒更新';
+  }else setLiveState(false,'無報價');
+}
+
+function startLive(){
+  if(liveTimer) clearInterval(liveTimer);
+  liveQuotes();
+  liveTimer=setInterval(liveQuotes,10000);
 }
 
 function renderTrades(){
   const t=(D.trades||[]).filter(x=>x.close_date);
   if(!t.length){$('trades').innerHTML='<div class="empty">尚無已平倉交易</div>';return;}
-  $('trades').innerHTML=`<table><tr><th>期間</th><th>代號/名稱</th><th>股數</th><th>買進→賣出</th><th>淨損益</th><th>原因</th></tr>
-  ${t.map(x=>`<tr><td>${x.open_date||''}→${x.close_date||''}</td><td>${x.sid} ${x.name||''}</td><td>${fmt(x.shares)}</td>
+  $('trades').innerHTML=`<table><thead><tr><th>期間</th><th>代號/名稱</th><th>股數</th><th>買進→賣出</th><th>淨損益</th><th>原因</th></tr></thead>
+  <tbody>${t.map(x=>`<tr><td>${x.open_date||''}→${x.close_date||''}</td><td>${x.sid} ${x.name||''}</td><td>${fmt(x.shares)}</td>
   <td>${f2(x.buy_price)}→${f2(x.close_price)}</td>
-  <td class="${cl(x.net_pnl)}">${x.net_pnl>0?'+':''}${fmt(x.net_pnl)}</td><td>${x.close_reason||'—'}</td></tr>`).join('')}</table>`;
+  <td class="${cl(x.net_pnl)}">${x.net_pnl>0?'+':''}${fmt(x.net_pnl)}</td><td>${x.close_reason||'—'}</td></tr>`).join('')}</tbody></table>`;
 }
 
 function renderDecs(){
@@ -248,16 +306,17 @@ function renderPlans(){
 function renderAudit(){
   const a=D.audit||[];
   if(!a.length){$('audit').innerHTML='<div class="empty">尚無可查核交易</div>';return;}
-  $('audit').innerHTML=`<table><tr><th>日期</th><th>代號</th><th>買進價</th><th>計劃買點區</th><th>符合</th><th>目標/停損</th><th>賣出價</th><th>淨損益</th></tr>
-  ${a.map(x=>{const pl=x.plan||{};return `<tr><td>${x.open_date||''}</td><td>${x.sid}</td><td>${f2(x.buy_price)}</td>
+  $('audit').innerHTML=`<table><thead><tr><th>日期</th><th>代號</th><th>買進價</th><th>計劃買點區</th><th>符合</th><th>目標/停損</th><th>賣出價</th><th>淨損益</th></tr></thead>
+  <tbody>${a.map(x=>{const pl=x.plan||{};return `<tr><td>${x.open_date||''}</td><td>${x.sid}</td><td>${f2(x.buy_price)}</td>
    <td>${pl.buy_low!=null?f2(pl.buy_low)+'–'+f2(pl.buy_high):'—'}</td>
    <td class="${x.in_buy_zone==null?'':x.in_buy_zone?'ok':'bad'}">${x.in_buy_zone==null?'—':x.in_buy_zone?'✓':'✗'}</td>
    <td>${pl.target!=null?f2(pl.target)+' / '+f2(pl.stop):'—'}</td><td>${f2(x.close_price)}</td>
-   <td class="${cl(x.net_pnl)}">${x.net_pnl>0?'+':''}${fmt(x.net_pnl)}</td></tr>`;}).join('')}</table>`;
+   <td class="${cl(x.net_pnl)}">${x.net_pnl>0?'+':''}${fmt(x.net_pnl)}</td></tr>`;}).join('')}</tbody></table>`;
 }
 
 load(false);
 setInterval(()=>load(false), 300000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){load(false);}});
 </script>
 </body>
 </html>
